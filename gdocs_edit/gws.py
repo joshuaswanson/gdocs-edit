@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 
 class GwsError(RuntimeError):
@@ -49,16 +50,35 @@ def _run(args: list[str]) -> dict:
         raise GwsError(f"Failed to parse gws JSON output: {e}\nOutput was:\n{body}") from e
 
 
-def get_document(document_id: str) -> dict:
+def get_document(document_id: str, include_tabs: bool = False) -> dict:
+    params: dict = {"documentId": document_id}
+    if include_tabs:
+        params["includeTabsContent"] = True
     return _run([
         "docs", "documents", "get",
-        "--params", json.dumps({"documentId": document_id}),
+        "--params", json.dumps(params),
     ])
 
 
-def batch_update(document_id: str, requests: list[dict]) -> dict:
+def batch_update(
+    document_id: str,
+    requests: list[dict],
+    dry_run: bool = False,
+) -> dict:
+    """Send a batchUpdate, or print what would be sent if dry_run=True."""
+    if not requests:
+        raise GwsError("batch_update called with no requests.")
+
+    body = {"requests": requests}
+    if dry_run:
+        print("DRY RUN: would call docs.documents.batchUpdate with:", file=sys.stderr)
+        print(f"  documentId: {document_id}", file=sys.stderr)
+        print("  requests:", file=sys.stderr)
+        print(json.dumps(body, indent=2))
+        return {"dryRun": True, "requests": requests}
+
     return _run([
         "docs", "documents", "batchUpdate",
         "--params", json.dumps({"documentId": document_id}),
-        "--json", json.dumps({"requests": requests}),
+        "--json", json.dumps(body),
     ])
