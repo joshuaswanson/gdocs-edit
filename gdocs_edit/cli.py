@@ -8,6 +8,37 @@ from . import gws
 from .styles import add_style_flags, build_text_style, update_text_style_request
 
 
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}
+
+
+def _unescape(s: str) -> str:
+    """Interpret the common backslash escapes (\\n, \\t, \\r, \\\\) in a string.
+
+    Other backslash sequences are left as-is so users who need a literal
+    backslash before an unknown letter don't have to double-escape it.
+    """
+    if s is None or "\\" not in s:
+        return s
+    out: list[str] = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\\" and i + 1 < len(s) and s[i + 1] in _ESCAPES:
+            out.append(_ESCAPES[s[i + 1]])
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _prepare_text(value: str, raw: bool) -> str:
+    """Apply escape interpretation unless --raw was passed."""
+    if raw:
+        return value
+    return _unescape(value)
+
+
 def _location(index: int, tab_id: str | None) -> dict:
     loc: dict = {"index": index}
     if tab_id:
@@ -91,6 +122,8 @@ def cmd_tabs(args: argparse.Namespace) -> int:
 
 
 def cmd_replace(args: argparse.Namespace) -> int:
+    args.old = _prepare_text(args.old, args.raw)
+    args.new = _prepare_text(args.new, args.raw)
     dt = _load_tab_text(args.doc_id, args.tab)
     ranges = _resolve_ranges(dt, args.old, args.occurrence, args.all)
 
@@ -124,11 +157,14 @@ def cmd_insert(args: argparse.Namespace) -> int:
         print("error: exactly one of --after or --before is required", file=sys.stderr)
         return 2
 
+    anchor_is_after = args.after is not None
+    anchor_raw: str = args.after if anchor_is_after else args.before
+    anchor = _prepare_text(anchor_raw, args.raw)
+    args.text = _prepare_text(args.text, args.raw)
     dt = _load_tab_text(args.doc_id, args.tab)
-    anchor = args.after if args.after is not None else args.before
     ranges = _resolve_ranges(dt, anchor, args.occurrence, all_matches=False)
     start, end = ranges[0]
-    index = end if args.after is not None else start
+    index = end if anchor_is_after else start
 
     style_spec = build_text_style(args)
     requests: list[dict] = [
@@ -143,13 +179,14 @@ def cmd_insert(args: argparse.Namespace) -> int:
         )
 
     gws.batch_update(args.doc_id, requests, dry_run=args.dry_run)
-    where = "after" if args.after is not None else "before"
+    where = "after" if anchor_is_after else "before"
     action = "Would insert" if args.dry_run else "Inserted"
     print(f"{action} {len(args.text)} chars at index {index} ({where} anchor).")
     return 0
 
 
 def cmd_append(args: argparse.Namespace) -> int:
+    args.text = _prepare_text(args.text, args.raw)
     dt = _load_tab_text(args.doc_id, args.tab)
     # Google Docs body always ends with a trailing newline; insert just before it.
     index = max(1, dt.body_end - 1)
@@ -173,6 +210,7 @@ def cmd_append(args: argparse.Namespace) -> int:
 
 
 def cmd_delete(args: argparse.Namespace) -> int:
+    args.text = _prepare_text(args.text, args.raw)
     dt = _load_tab_text(args.doc_id, args.tab)
     ranges = _resolve_ranges(dt, args.text, args.occurrence, args.all)
 
@@ -188,6 +226,7 @@ def cmd_delete(args: argparse.Namespace) -> int:
 
 
 def cmd_style(args: argparse.Namespace) -> int:
+    args.text = _prepare_text(args.text, args.raw)
     dt = _load_tab_text(args.doc_id, args.tab)
     ranges = _resolve_ranges(dt, args.text, args.occurrence, args.all)
 
@@ -217,6 +256,8 @@ def _add_common_edit_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tab", metavar="TAB_ID", help="Operate on a specific tab (see `gdocs tabs`).")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the batchUpdate request that would be sent, without sending it.")
+    p.add_argument("--raw", action="store_true",
+                   help=r"Do not interpret \n, \t, \r, \\ escapes in text arguments.")
 
 
 def _add_match_flags(p: argparse.ArgumentParser, allow_all: bool) -> None:

@@ -4,6 +4,29 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# Single-codepoint substitutions applied before substring matching. Google Docs
+# silently "smart-quotes" straight quotes in the UI and frequently uses NBSP for
+# wrapping control. The length is preserved so the parallel index_map stays aligned.
+_NORMALIZE = str.maketrans({
+    "\u2018": "'",   # LEFT SINGLE QUOTATION MARK
+    "\u2019": "'",   # RIGHT SINGLE QUOTATION MARK (curly apostrophe)
+    "\u201A": "'",   # SINGLE LOW-9 QUOTATION MARK
+    "\u201B": "'",   # SINGLE HIGH-REVERSED-9 QUOTATION MARK
+    "\u201C": '"',   # LEFT DOUBLE QUOTATION MARK
+    "\u201D": '"',   # RIGHT DOUBLE QUOTATION MARK
+    "\u201E": '"',   # DOUBLE LOW-9 QUOTATION MARK
+    "\u00A0": " ",   # NO-BREAK SPACE
+    "\u2028": "\n",  # LINE SEPARATOR
+    "\u2029": "\n",  # PARAGRAPH SEPARATOR
+    "\u000B": "\n",  # VERTICAL TAB (soft line break inside paragraphs)
+})
+
+
+def normalize(s: str) -> str:
+    """Apply match-time text normalization (quotes, NBSP, soft breaks)."""
+    return s.translate(_NORMALIZE)
+
+
 @dataclass
 class DocText:
     """Flat text of a document segment plus a map from flat-text offset to absolute doc index.
@@ -129,17 +152,23 @@ def extract_all_tabs(doc: dict) -> list[DocText]:
 def find_ranges(doc_text: DocText, target: str) -> list[tuple[int, int]]:
     """Return absolute [start, end) ranges for every occurrence of `target`.
 
+    Matching is done after normalization so that curly quotes, NBSPs, and soft
+    line breaks in the document match their ASCII equivalents in the target
+    (and vice versa). Normalization is length-preserving, so index_map stays
+    aligned with the original document positions.
+
     Matches are returned in document order (lowest start index first).
     """
     if not target:
         raise ValueError("Target text must be non-empty.")
 
     out: list[tuple[int, int]] = []
-    text = doc_text.text
-    n = len(target)
+    text = normalize(doc_text.text)
+    norm_target = normalize(target)
+    n = len(norm_target)
     pos = 0
     while True:
-        hit = text.find(target, pos)
+        hit = text.find(norm_target, pos)
         if hit == -1:
             break
         abs_start = doc_text.index_map[hit]

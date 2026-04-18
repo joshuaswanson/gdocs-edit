@@ -77,6 +77,19 @@ gdocs append  $DOC --tab t.1.0 --text "\nSee also."
 
 `gdocs read --all-tabs DOC` prints every tab with a header between them.
 
+## Text arguments: smart matching and escape sequences
+
+Google Docs silently rewrites some characters you type (straight quotes become curly, regular spaces become non-breaking spaces around wrapped words). To keep targeting sane, `gdocs` normalizes both the document text and the target string before matching. You can type `It's` to match `It's`, and either form works for `--old`, `--after`, `--before`, `--text`, etc. The underlying document is untouched; only the match comparison is normalized. The normalization covers curly single/double quotes, NBSP, and soft line breaks.
+
+Text arguments also interpret the usual backslash escapes: `\n`, `\t`, `\r`, `\\`. So you can insert paragraph breaks and tabs straight from the shell:
+
+```bash
+gdocs append $DOC --text "\nChangelog\n\n- Initial release."
+gdocs replace $DOC --old "line one.\nline two." --new "combined line."
+```
+
+Unknown escapes (like `\q`) are left untouched. Pass `--raw` on any edit command to disable escape interpretation entirely, if you need literal backslash-n in the document.
+
 ## Formatting
 
 `insert`, `append`, `replace` (the new text), and the dedicated `style` command accept formatting flags. Each one has a `--no-*` counterpart to explicitly clear a style:
@@ -125,7 +138,7 @@ Because `gdocs` shells out to `gws`, it inherits whatever auth scopes and accoun
 ## Caveats
 
 - `gdocs` only touches textual content and its character-level formatting. It does not author images, tables, comments, suggestions, or paragraph-level styles (headings, alignment, bullets). Existing rich content is preserved but not created or modified.
-- Matching is exact-string only. There is no regex or case-insensitive mode yet; make anchors longer until they are unambiguous.
+- Matching is substring-based, not regex, and not case-insensitive. Smart matching covers curly quotes, NBSP, and soft line breaks; everything else must match byte-for-byte. Make anchors longer until they are unambiguous.
 
 ## Support
 
